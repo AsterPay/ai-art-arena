@@ -1,9 +1,9 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { z } from 'zod';
-import AIJudgeService from '../services/ai-judge';
-import X402PaymentService from '../services/x402-payment';
-import { setEntriesStorage, startCronScheduler, manualFinalize } from '../services/game-automation';
+import AIJudgeService from './services/ai-judge';
+import X402PaymentService from './services/x402-payment';
+import { setEntriesStorage, startCronScheduler, manualFinalize } from './services/game-automation';
 
 // Environment
 const PORT = parseInt(process.env.PORT || '3001');
