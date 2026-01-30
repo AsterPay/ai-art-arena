@@ -72,7 +72,9 @@ const app = Fastify({ logger: true });
 // Register plugins
 app.register(cors, {
   origin: true,
-  methods: ['GET', 'POST']
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 });
 
 // ============ Routes ============
