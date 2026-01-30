@@ -109,7 +109,7 @@ export class X402PaymentService {
       // Check for USDC Transfer event to prize pool
       const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
       
-      const transferLog = receipt.logs.find(log => 
+      const transferLog = receipt.logs.find((log: any) => 
         log.address.toLowerCase() === this.usdcAddress.toLowerCase() &&
         log.topics[0] === transferTopic &&
         log.topics[2]?.toLowerCase().includes(this.prizePoolAddress.slice(2).toLowerCase())
