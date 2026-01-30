@@ -8,11 +8,13 @@ import ImageUpload from './ImageUpload';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 // USDC on Base mainnet
-const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+const USDC_MAINNET = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const USDC_TESTNET = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
 const ENTRY_FEE = parseUnits('0.05', 6); // $0.05
 
-// Temporary test address (user's own address for testing)
-const TEST_PRIZE_POOL = '0xc053ae9c16DCBeE9e7f4eEe633dAd2bAC4A46686';
+// Use mainnet in production, testnet in development
+const IS_MAINNET = process.env.NEXT_PUBLIC_CHAIN_ID === '8453';
+const USDC_ADDRESS = IS_MAINNET ? USDC_MAINNET : USDC_TESTNET;
 
 interface SubmitModalProps {
   isOpen: boolean;
@@ -80,7 +82,7 @@ export function SubmitModal({ isOpen, onClose, onSuccess, prizePoolAddress }: Su
           outputs: [{ name: '', type: 'bool' }]
         }],
         functionName: 'approve',
-        args: [TEST_PRIZE_POOL as `0x${string}`, ENTRY_FEE],
+        args: [prizePoolAddress as `0x${string}`, ENTRY_FEE],
       });
       setStep('approve');
     } catch (err) {
@@ -104,7 +106,7 @@ export function SubmitModal({ isOpen, onClose, onSuccess, prizePoolAddress }: Su
           outputs: [{ name: '', type: 'bool' }]
         }],
         functionName: 'transfer',
-        args: [TEST_PRIZE_POOL as `0x${string}`, ENTRY_FEE],
+        args: [prizePoolAddress as `0x${string}`, ENTRY_FEE],
       });
       setStep('pay');
     } catch (err) {
