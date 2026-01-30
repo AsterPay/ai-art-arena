@@ -269,6 +269,10 @@ app.post('/api/admin/finalize', async (request, reply) => {
     return reply.status(400).send({ error: 'No submissions to judge' });
   }
 
+  if (!aiJudge) {
+    return reply.status(500).send({ error: 'AI Judge service not available' });
+  }
+
   // Judge submissions
   const result = await aiJudge.judgeSubmissions(
     game.submissions.map(s => ({
