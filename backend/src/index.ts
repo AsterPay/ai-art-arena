@@ -90,16 +90,38 @@ app.get('/api/game', async () => {
   // Try database first, fallback to in-memory
   try {
     if (process.env.DATABASE_URL) {
-      const gameData = await db.getOrCreateGame(currentGameId || 1);
+      // Always get the latest non-finalized game, or create new one
+      const latestGameId = await db.getLatestGameId();
+      let gameData = await db.getOrCreateGame(latestGameId);
+      
+      // If latest game is finalized, create a new one
+      if (gameData.finalized) {
+        const newGameId = await db.createNextGame();
+        gameData = await db.getOrCreateGame(newGameId);
+      }
+      
+      currentGameId = gameData.gameId; // Update global state
       const entries = await db.getEntriesForGame(gameData.gameId);
+      
+      // Calculate time remaining (0 if not started yet)
+      const timeRemaining = gameData.started && gameData.endTime > 0 
+        ? Math.max(0, gameData.endTime - Date.now())
+        : 0;
+      
       return {
         gameId: gameData.gameId,
         startTime: gameData.startTime,
         endTime: gameData.endTime,
         entryCount: entries.length,
-        prizePool: paymentService ? await paymentService.getPrizePoolBalance() : '0',
-        timeRemaining: Math.max(0, gameData.endTime - Date.now()),
-        finalized: gameData.finalized
+        prizePool: (entries.length * 0.05).toFixed(2), // Calculate from entries
+        timeRemaining,
+        finalized: gameData.finalized,
+        started: gameData.started,
+        status: gameData.finalized 
+          ? 'finalized' 
+          : gameData.started 
+            ? (timeRemaining > 0 ? 'active' : 'ended') 
+            : 'waiting'
       };
     }
   } catch (e) {
@@ -116,9 +138,11 @@ app.get('/api/game', async () => {
     startTime: game.startTime,
     endTime: game.endTime,
     entryCount: game.submissions.length,
-    prizePool: paymentService ? await paymentService.getPrizePoolBalance() : '0',
+    prizePool: (game.submissions.length * 0.05).toFixed(2),
     timeRemaining: Math.max(0, game.endTime - Date.now()),
-    finalized: game.finalized
+    finalized: game.finalized,
+    started: true,
+    status: game.finalized ? 'finalized' : 'active'
   };
 });
 
@@ -166,7 +190,22 @@ app.post('/api/submit', async (request, reply) => {
   }
 
   const { imageUrl, title, walletAddress, paymentTxHash } = parsed.data;
-  const gameId = currentGameId || 1;
+  
+  // Get latest active game
+  let gameId = currentGameId || 1;
+  if (process.env.DATABASE_URL) {
+    try {
+      gameId = await db.getLatestGameId();
+      const gameData = await db.getOrCreateGame(gameId);
+      // If game is finalized, create new one
+      if (gameData.finalized) {
+        gameId = await db.createNextGame();
+      }
+      currentGameId = gameId;
+    } catch (e) {
+      console.log('Error getting latest game:', e);
+    }
+  }
 
   // Verify payment
   if (!paymentService) {
@@ -190,18 +229,33 @@ app.post('/api/submit', async (request, reply) => {
         return reply.status(400).send({ error: 'Already entered this game' });
       }
 
+      // Get current game state
+      const gameData = await db.getOrCreateGame(gameId);
+      
+      // Check if game has ended (but not finalized yet)
+      if (gameData.started && gameData.endTime > 0 && Date.now() > gameData.endTime) {
+        return reply.status(400).send({ error: 'Game has ended, wait for next round' });
+      }
+
       // Add to database
       const entry = await db.addEntry(gameId, imageUrl, title, walletAddress, paymentTxHash);
       await db.updateGamePrizePool(gameId, '0.05');
 
+      // If this is the first entry, start the 6-hour timer!
       const entries = await db.getEntriesForGame(gameId);
+      if (entries.length === 1 && !gameData.started) {
+        const { endTime } = await db.startGameTimer(gameId);
+        console.log(`🎯 First entry received! Game #${gameId} ends at ${new Date(endTime).toISOString()}`);
+      }
+
       return {
         success: true,
         submission: {
           id: entry.id,
           title: title,
           position: entries.length
-        }
+        },
+        gameStarted: entries.length === 1
       };
     }
   } catch (e) {
@@ -460,24 +514,30 @@ app.get('/api/admin/status', async () => {
 
 const start = async () => {
   try {
-    // Start with an initial game (24 hours)
-    currentGameId = 1;
-    // Initialize database if configured
+    // Initialize database and get current game
     if (process.env.DATABASE_URL) {
       try {
         await db.initDatabase();
         console.log('✅ PostgreSQL database connected');
+        
+        // Get or create game 1
+        const gameData = await db.getOrCreateGame(1);
+        currentGameId = gameData.gameId;
+        console.log(`📊 Current game: #${currentGameId} (${gameData.started ? 'active' : 'waiting for entries'})`);
       } catch (e) {
         console.log('⚠️ Database initialization failed, using in-memory storage:', e);
+        currentGameId = 1;
       }
     } else {
       console.log('⚠️ DATABASE_URL not set - using in-memory storage (data will be lost on restart)');
+      currentGameId = 1;
     }
 
+    // In-memory fallback
     games.set(1, {
       id: 1,
       startTime: Date.now(),
-      endTime: Date.now() + 24 * 60 * 60 * 1000,
+      endTime: 0, // Not started yet
       submissions: [],
       finalized: false
     });

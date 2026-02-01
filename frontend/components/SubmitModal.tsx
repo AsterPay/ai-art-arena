@@ -10,7 +10,10 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 // USDC on Base mainnet
 const USDC_MAINNET = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const USDC_TESTNET = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
-const ENTRY_FEE = parseUnits('0.05', 6); // $0.05
+const ENTRY_FEE = parseUnits('0.05', 6); // $0.05 USDC entry fee
+
+// AsterPay wallet for receiving entry fees (direct transfer, no smart contract needed)
+const ASTERPAY_WALLET = '0x3A649F923c7E74e5C22E766f8E0FA2CF7e627e71';
 
 // Use mainnet in production, testnet in development
 const IS_MAINNET = process.env.NEXT_PUBLIC_CHAIN_ID === '8453';
@@ -23,11 +26,10 @@ interface SubmitModalProps {
   prizePoolAddress: string;
 }
 
-type Step = 'upload' | 'approve' | 'pay' | 'submit' | 'success';
+type Step = 'upload' | 'pay' | 'submit' | 'success';
 
 const STEPS = [
   { id: 'upload', label: 'Upload', icon: '📤' },
-  { id: 'approve', label: 'Approve', icon: '✅' },
   { id: 'pay', label: 'Pay', icon: '💳' },
   { id: 'submit', label: 'Submit', icon: '🚀' },
 ];
@@ -39,17 +41,20 @@ export function SubmitModal({ isOpen, onClose, onSuccess, prizePoolAddress }: Su
   const [imageUrl, setImageUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  // USDC Approve
-  const { writeContract: approve, data: approveHash } = useWriteContract();
-  const { isLoading: isApproving, isSuccess: isApproved } = useWaitForTransactionReceipt({
-    hash: approveHash,
-  });
-
-  // USDC Transfer (entry fee)
-  const { writeContract: transfer, data: transferHash } = useWriteContract();
+  // USDC Transfer (direct to AsterPay wallet - no approve needed!)
+  const { writeContract: transfer, data: transferHash, error: transferError } = useWriteContract();
   const { isLoading: isTransferring, isSuccess: isTransferred } = useWaitForTransactionReceipt({
     hash: transferHash,
   });
+
+  // Log transfer errors
+  useEffect(() => {
+    if (transferError) {
+      console.error('Transfer error:', transferError);
+      setError(transferError.message || 'Transfer failed');
+      setStep('upload');
+    }
+  }, [transferError]);
 
   // Reset on close
   useEffect(() => {
@@ -66,33 +71,12 @@ export function SubmitModal({ isOpen, onClose, onSuccess, prizePoolAddress }: Su
     setError(null);
   };
 
-  const handleApprove = async () => {
-    setError(null);
-    try {
-      approve({
-        address: USDC_ADDRESS,
-        abi: [{
-          name: 'approve',
-          type: 'function',
-          stateMutability: 'nonpayable',
-          inputs: [
-            { name: 'spender', type: 'address' },
-            { name: 'amount', type: 'uint256' }
-          ],
-          outputs: [{ name: '', type: 'bool' }]
-        }],
-        functionName: 'approve',
-        args: [prizePoolAddress as `0x${string}`, ENTRY_FEE],
-      });
-      setStep('approve');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Approval failed');
-    }
-  };
-
+  // Direct USDC transfer to AsterPay wallet (no approve needed!)
   const handlePay = async () => {
     setError(null);
+    setStep('pay');
     try {
+      console.log('Initiating USDC transfer to:', ASTERPAY_WALLET);
       transfer({
         address: USDC_ADDRESS,
         abi: [{
@@ -106,11 +90,12 @@ export function SubmitModal({ isOpen, onClose, onSuccess, prizePoolAddress }: Su
           outputs: [{ name: '', type: 'bool' }]
         }],
         functionName: 'transfer',
-        args: [prizePoolAddress as `0x${string}`, ENTRY_FEE],
+        args: [ASTERPAY_WALLET as `0x${string}`, ENTRY_FEE],
       });
-      setStep('pay');
     } catch (err) {
+      console.error('Payment error:', err);
       setError(err instanceof Error ? err.message : 'Payment failed');
+      setStep('upload');
     }
   };
 
@@ -159,13 +144,7 @@ export function SubmitModal({ isOpen, onClose, onSuccess, prizePoolAddress }: Su
     }
   };
 
-  // Auto-advance steps
-  useEffect(() => {
-    if (isApproved && step === 'approve') {
-      handlePay();
-    }
-  }, [isApproved, step]);
-
+  // Auto-advance when payment confirmed
   useEffect(() => {
     if (isTransferred && step === 'pay') {
       handleSubmit();
@@ -275,7 +254,7 @@ export function SubmitModal({ isOpen, onClose, onSuccess, prizePoolAddress }: Su
 
               {/* Action Button */}
               <button
-                onClick={step === 'upload' ? handleApprove : undefined}
+                onClick={step === 'upload' ? handlePay : undefined}
                 disabled={!canProceed || step !== 'upload'}
                 className={`
                   w-full py-4 rounded-xl font-bold text-lg transition-all duration-300
@@ -289,15 +268,6 @@ export function SubmitModal({ isOpen, onClose, onSuccess, prizePoolAddress }: Su
                   <span className="flex items-center justify-center gap-2">
                     <span>💳</span>
                     <span>Pay $0.05 & Submit</span>
-                  </span>
-                )}
-                {step === 'approve' && (
-                  <span className="flex items-center justify-center gap-2">
-                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    <span>Approving USDC...</span>
                   </span>
                 )}
                 {step === 'pay' && (

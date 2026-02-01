@@ -6,6 +6,10 @@ const IS_MAINNET = process.env.NODE_ENV === 'production';
 const CHAIN = IS_MAINNET ? base : baseSepolia;
 import { privateKeyToAccount } from 'viem/accounts';
 import { judgeArtworks, SimpleArtSubmission } from './ai-judge';
+import * as db from './database';
+
+// AsterPay platform wallet for 10% fee
+const ASTERPAY_WALLET = process.env.ASTERPAY_WALLET || '0x3A649F923c7E74e5C22E766f8E0FA2CF7e627e71';
 
 // Contract addresses
 const PRIZE_POOL_ADDRESS = process.env.PRIZE_POOL_ADDRESS as `0x${string}`;
@@ -304,44 +308,121 @@ async function startNewGame(): Promise<void> {
   }
 }
 
-// Schedule daily finalization (runs at 00:00 UTC)
+// Check and finalize expired games
+async function checkAndFinalizeExpiredGames(): Promise<void> {
+  console.log('🔍 Checking for expired games...');
+  
+  try {
+    const expiredGames = await db.getExpiredGames();
+    
+    if (expiredGames.length === 0) {
+      console.log('   No expired games to finalize');
+      return;
+    }
+
+    for (const game of expiredGames) {
+      console.log(`\n🎮 Finalizing game #${game.gameId}...`);
+      
+      // Get entries for this game
+      const entries = await db.getAllEntriesForGame(game.gameId);
+      
+      if (entries.length === 0) {
+        console.log(`   No entries for game #${game.gameId}, skipping`);
+        continue;
+      }
+
+      // Judge entries with AI
+      console.log(`   🤖 AI judging ${entries.length} entries...`);
+      const submissions: SimpleArtSubmission[] = entries.map(e => ({
+        id: e.id.toString(),
+        imageUrl: e.imageUrl,
+        title: e.title,
+        artist: e.playerAddress
+      }));
+
+      const scores = await judgeArtworks(submissions);
+      
+      // Find winner (highest total score)
+      let winnerIndex = 0;
+      let highestScore = 0;
+      
+      scores.forEach((score, index) => {
+        const total = score.creativity + score.technique + score.theme;
+        if (total > highestScore) {
+          highestScore = total;
+          winnerIndex = index;
+        }
+        
+        // Update entry scores in database
+        db.updateEntryScores(
+          game.gameId,
+          entries[index].playerAddress,
+          score.creativity,
+          score.technique,
+          score.theme,
+          score.reasoning
+        );
+      });
+
+      const winner = entries[winnerIndex];
+      const winnerScore = scores[winnerIndex];
+
+      // Calculate prize distribution
+      const totalPrize = parseFloat(game.prizePool);
+      const winnerPrize = (totalPrize * 0.9).toFixed(2);  // 90% to winner
+      const platformFee = (totalPrize * 0.1).toFixed(2);  // 10% to AsterPay
+
+      console.log(`   🏆 Winner: "${winner.title}" by ${winner.playerAddress}`);
+      console.log(`   📊 Score: ${highestScore}/300`);
+      console.log(`   💰 Prize: $${winnerPrize} USDC (winner) + $${platformFee} (platform fee)`);
+
+      // Finalize in database
+      await db.finalizeGame(
+        game.gameId,
+        winner.playerAddress,
+        winner.title,
+        highestScore,
+        winner.imageUrl
+      );
+
+      console.log(`   ✅ Game #${game.gameId} finalized!`);
+      
+      // TODO: Actually transfer USDC to winner and platform wallet
+      // For now, log the intended transfers
+      console.log(`   📤 [Pending] Transfer $${winnerPrize} USDC to ${winner.playerAddress}`);
+      console.log(`   📤 [Pending] Transfer $${platformFee} USDC to ${ASTERPAY_WALLET}`);
+      
+      // Create next game
+      const nextGameId = await db.createNextGame();
+      console.log(`   🆕 Next game #${nextGameId} ready!`);
+    }
+  } catch (error) {
+    console.error('❌ Error checking expired games:', error);
+  }
+}
+
+// Schedule game finalization checks (runs every 5 minutes)
 export function startCronScheduler(): void {
   console.log('⏰ Starting cron scheduler...');
 
-  // Run every day at 00:00 UTC
-  cron.schedule('0 0 * * *', async () => {
-    console.log('');
-    console.log('═══════════════════════════════════════');
-    console.log('🎯 DAILY GAME FINALIZATION - ' + new Date().toISOString());
+  // Check for expired games every 5 minutes
+  cron.schedule('*/5 * * * *', async () => {
+    console.log('\n═══════════════════════════════════════');
+    console.log('🔄 CHECKING EXPIRED GAMES - ' + new Date().toISOString());
     console.log('═══════════════════════════════════════');
 
-    const result = await finalizeCurrentGame();
+    await checkAndFinalizeExpiredGames();
 
-    if (result.success) {
-      console.log('');
-      console.log('🎉 GAME FINALIZED SUCCESSFULLY!');
-      console.log(`   Winner: ${result.winner?.title}`);
-      console.log(`   Address: ${result.winner?.address}`);
-      console.log(`   Prize: $${result.prizeAmount} USDC`);
-      console.log('');
-    } else {
-      console.log(`❌ Finalization failed: ${result.error}`);
-    }
-
-    console.log('═══════════════════════════════════════');
-    console.log('');
-  }, {
-    timezone: 'UTC'
+    console.log('═══════════════════════════════════════\n');
   });
 
-  console.log('✅ Cron scheduled: Daily at 00:00 UTC');
-
-  // Also run every hour for testing (can be disabled in production)
-  if (process.env.NODE_ENV !== 'production') {
-    cron.schedule('0 * * * *', () => {
-      console.log('⏰ Hourly check (dev mode) - ' + new Date().toISOString());
-    });
-  }
+  console.log('✅ Cron scheduled: Check every 5 minutes for expired games');
+  
+  // Run initial check on startup
+  setTimeout(async () => {
+    console.log('🚀 Initial check for expired games...');
+    await checkAndFinalizeExpiredGames();
+  }, 5000);
 }
 
 // Manual trigger for testing

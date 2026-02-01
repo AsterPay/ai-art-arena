@@ -16,6 +16,8 @@ interface GameInfo {
   prizePool: string;
   timeRemaining: number;
   finalized: boolean;
+  started: boolean;
+  status: 'waiting' | 'active' | 'ended' | 'finalized';
 }
 
 interface LeaderboardEntry {
@@ -24,6 +26,8 @@ interface LeaderboardEntry {
   imageUrl: string;
   playerAddress: string;
   submittedAt: number;
+  isWinner?: boolean;
+  scoreTotal?: number;
 }
 
 export default function Home() {
@@ -79,12 +83,30 @@ export default function Home() {
 
   // Countdown timer
   useEffect(() => {
-    if (!game?.timeRemaining) return;
-
     const updateTimer = () => {
+      if (!game) return;
+      
+      // If game not started yet, show waiting message
+      if (!game.started || game.status === 'waiting') {
+        setTimeLeft('Waiting for first entry');
+        return;
+      }
+      
+      // If game finalized
+      if (game.finalized || game.status === 'finalized') {
+        setTimeLeft('Winner announced!');
+        return;
+      }
+      
+      // If game ended but not finalized
+      if (game.status === 'ended') {
+        setTimeLeft('Judging...');
+        return;
+      }
+
       const remaining = game.endTime - Date.now();
       if (remaining <= 0) {
-        setTimeLeft('Game ended!');
+        setTimeLeft('Judging...');
         return;
       }
 
@@ -134,6 +156,7 @@ export default function Home() {
           </h2>
           <p className="text-xl text-gray-600 mb-10 max-w-2xl mx-auto">
             Submit your AI-generated art. Pay $0.05 to enter. 
+            <br />Competition runs <span className="text-purple-600 font-semibold">6 hours</span> from first entry.
             <br />Winner takes <span className="text-green-600 font-semibold">90%</span> of the prize pool.
           </p>
 
@@ -236,8 +259,13 @@ export default function Home() {
                       <span className="opacity-0 group-hover:opacity-100 text-white text-2xl transition-opacity">🔍</span>
                     </div>
                     <div className="absolute top-3 right-3 w-10 h-10 rounded-full bg-white shadow-lg flex items-center justify-center text-xl">
-                      {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                      {entry.isWinner ? '🏆' : i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
                     </div>
+                    {entry.isWinner && (
+                      <div className="absolute bottom-3 left-3 px-3 py-1 rounded-full bg-yellow-400 text-yellow-900 text-xs font-bold shadow-lg">
+                        WINNER!
+                      </div>
+                    )}
                   </div>
                   <div className="p-4">
                     <h4 className="font-semibold text-gray-800 truncate">{entry.title}</h4>

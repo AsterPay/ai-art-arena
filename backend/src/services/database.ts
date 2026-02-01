@@ -17,9 +17,10 @@ export async function initDatabase(): Promise<void> {
         id SERIAL PRIMARY KEY,
         game_id INTEGER UNIQUE NOT NULL,
         start_time BIGINT NOT NULL,
-        end_time BIGINT NOT NULL,
+        end_time BIGINT NOT NULL DEFAULT 0,
         prize_pool DECIMAL(20, 6) DEFAULT 0,
         entry_count INTEGER DEFAULT 0,
+        started BOOLEAN DEFAULT FALSE,
         finalized BOOLEAN DEFAULT FALSE,
         winner_address VARCHAR(42),
         winner_title VARCHAR(255),
@@ -27,6 +28,11 @@ export async function initDatabase(): Promise<void> {
         winner_image_url TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
+    `);
+
+    // Add started column if it doesn't exist (migration for existing tables)
+    await pool.query(`
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS started BOOLEAN DEFAULT FALSE
     `);
 
     // Create entries table
@@ -61,6 +67,9 @@ export async function initDatabase(): Promise<void> {
   }
 }
 
+// Game duration: 6 hours (in milliseconds)
+const GAME_DURATION_MS = 6 * 60 * 60 * 1000;
+
 // Game operations
 export async function getOrCreateGame(gameId: number): Promise<{
   gameId: number;
@@ -69,6 +78,7 @@ export async function getOrCreateGame(gameId: number): Promise<{
   prizePool: string;
   entryCount: number;
   finalized: boolean;
+  started: boolean;
 }> {
   // Try to get existing game
   const result = await pool.query(
@@ -84,27 +94,90 @@ export async function getOrCreateGame(gameId: number): Promise<{
       endTime: parseInt(game.end_time),
       prizePool: game.prize_pool || '0',
       entryCount: game.entry_count || 0,
-      finalized: game.finalized
+      finalized: game.finalized,
+      started: game.started || false
     };
   }
 
-  // Create new game
+  // Create new game (not started yet - waits for first entry)
   const now = Date.now();
-  const endTime = now + 24 * 60 * 60 * 1000; // 24 hours
 
   await pool.query(
-    'INSERT INTO games (game_id, start_time, end_time) VALUES ($1, $2, $3)',
-    [gameId, now, endTime]
+    'INSERT INTO games (game_id, start_time, end_time, started) VALUES ($1, $2, $3, $4)',
+    [gameId, now, 0, false]  // endTime = 0 means not started
   );
 
   return {
     gameId,
     startTime: now,
-    endTime,
+    endTime: 0,
     prizePool: '0',
     entryCount: 0,
-    finalized: false
+    finalized: false,
+    started: false
   };
+}
+
+// Start game timer when first entry arrives
+export async function startGameTimer(gameId: number): Promise<{ startTime: number; endTime: number }> {
+  const now = Date.now();
+  const endTime = now + GAME_DURATION_MS; // 6 hours from now
+
+  await pool.query(
+    'UPDATE games SET start_time = $1, end_time = $2, started = TRUE WHERE game_id = $3 AND started = FALSE',
+    [now, endTime, gameId]
+  );
+
+  console.log(`🎮 Game #${gameId} started! Ends at ${new Date(endTime).toISOString()}`);
+
+  return { startTime: now, endTime };
+}
+
+// Get active (not finalized) games that have ended
+export async function getExpiredGames(): Promise<Array<{
+  gameId: number;
+  entryCount: number;
+  prizePool: string;
+}>> {
+  const now = Date.now();
+  const result = await pool.query(
+    `SELECT game_id, entry_count, prize_pool 
+     FROM games 
+     WHERE finalized = FALSE 
+       AND started = TRUE 
+       AND end_time > 0 
+       AND end_time < $1 
+       AND entry_count > 0`,
+    [now]
+  );
+
+  return result.rows.map(row => ({
+    gameId: row.game_id,
+    entryCount: row.entry_count || 0,
+    prizePool: row.prize_pool || '0'
+  }));
+}
+
+// Create next game (called after finalization)
+export async function createNextGame(): Promise<number> {
+  // Find highest game_id
+  const result = await pool.query('SELECT MAX(game_id) as max_id FROM games');
+  const nextGameId = (result.rows[0]?.max_id || 0) + 1;
+
+  const now = Date.now();
+  await pool.query(
+    'INSERT INTO games (game_id, start_time, end_time, started) VALUES ($1, $2, $3, $4)',
+    [nextGameId, now, 0, false]
+  );
+
+  console.log(`🆕 New game #${nextGameId} created (waiting for first entry)`);
+  return nextGameId;
+}
+
+// Get latest game ID
+export async function getLatestGameId(): Promise<number> {
+  const result = await pool.query('SELECT MAX(game_id) as max_id FROM games');
+  return result.rows[0]?.max_id || 1;
 }
 
 export async function updateGamePrizePool(gameId: number, amount: string): Promise<void> {
