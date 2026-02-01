@@ -2,18 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { parseUnits } from 'viem';
+import { parseUnits, getAddress } from 'viem';
 import ImageUpload from './ImageUpload';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 // USDC on Base mainnet
-const USDC_MAINNET = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-const USDC_TESTNET = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+const USDC_MAINNET = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+const USDC_TESTNET = getAddress('0x036CbD53842c5426634e7929541eC2318f3dCF7e');
 const ENTRY_FEE = parseUnits('0.05', 6); // $0.05 USDC entry fee
 
 // AsterPay wallet for receiving entry fees (direct transfer, no smart contract needed)
-const ASTERPAY_WALLET = '0x3a649f923c7e74E5c22e766F8E0fA2CF7e627e71';
+const ASTERPAY_WALLET = getAddress('0x3a649f923c7e74E5c22e766F8E0fA2CF7e627e71');
 
 // Use mainnet in production, testnet in development
 const IS_MAINNET = process.env.NEXT_PUBLIC_CHAIN_ID === '8453';
