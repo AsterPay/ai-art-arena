@@ -119,18 +119,31 @@ export async function getOrCreateGame(gameId: number): Promise<{
 }
 
 // Start game timer when first entry arrives
-export async function startGameTimer(gameId: number): Promise<{ startTime: number; endTime: number }> {
+export async function startGameTimer(gameId: number): Promise<{ startTime: number; endTime: number; updated: boolean }> {
   const now = Date.now();
   const endTime = now + GAME_DURATION_MS; // 6 hours from now
 
-  await pool.query(
-    'UPDATE games SET start_time = $1, end_time = $2, started = TRUE WHERE game_id = $3 AND started = FALSE',
+  const result = await pool.query(
+    'UPDATE games SET start_time = $1, end_time = $2, started = TRUE WHERE game_id = $3 AND started = FALSE RETURNING end_time',
     [now, endTime, gameId]
   );
 
-  console.log(`🎮 Game #${gameId} started! Ends at ${new Date(endTime).toISOString()}`);
-
-  return { startTime: now, endTime };
+  if (result.rowCount && result.rowCount > 0) {
+    console.log(`🎮 Game #${gameId} started! Ends at ${new Date(endTime).toISOString()}`);
+    return { startTime: now, endTime, updated: true };
+  } else {
+    // Game was already started - fetch current end_time
+    const existing = await pool.query('SELECT start_time, end_time FROM games WHERE game_id = $1', [gameId]);
+    if (existing.rows.length > 0) {
+      console.log(`⚠️ Game #${gameId} already started, current endTime: ${existing.rows[0].end_time}`);
+      return { 
+        startTime: parseInt(existing.rows[0].start_time), 
+        endTime: parseInt(existing.rows[0].end_time),
+        updated: false 
+      };
+    }
+    return { startTime: now, endTime, updated: false };
+  }
 }
 
 // Get active (not finalized) games that have ended

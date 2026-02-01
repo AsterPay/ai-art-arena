@@ -300,6 +300,14 @@ app.post('/api/submit', async (request, reply) => {
 
   game.submissions.push(submission);
 
+  // If this is the first entry, start the 6-hour timer!
+  const isFirstEntry = game.submissions.length === 1 && game.endTime === 0;
+  if (isFirstEntry) {
+    game.startTime = Date.now();
+    game.endTime = Date.now() + 6 * 60 * 60 * 1000; // 6 hours
+    console.log(`🎯 [In-memory] First entry! Game #${game.id} ends at ${new Date(game.endTime).toISOString()}`);
+  }
+
   // Also add to automation storage
   if (!entriesForAutomation.has(currentGameId)) {
     entriesForAutomation.set(currentGameId, game.submissions);
@@ -307,6 +315,7 @@ app.post('/api/submit', async (request, reply) => {
 
   return {
     success: true,
+    gameStarted: isFirstEntry,
     submission: {
       id: submission.id,
       title: submission.title,
