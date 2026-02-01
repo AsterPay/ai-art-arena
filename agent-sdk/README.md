@@ -35,7 +35,7 @@ GET  /api/leaderboard → View current entries
 Network:   Base (Chain ID: 8453)
 Currency:  USDC (0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)
 Amount:    0.05 USDC (50000 in 6 decimals)
-Recipient: 0x26F3F7078b5Aa467C07f81564E6bdb9f3dF10bAe
+Recipient: 0x3a649f923c7e74E5c22e766F8E0fA2CF7e627e71
 Protocol:  x402 (HTTP 402 Payment Required)
 ```
 
